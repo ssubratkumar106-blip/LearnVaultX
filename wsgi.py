@@ -4,6 +4,17 @@ WSGI entry point for production deployment (Render, Heroku, etc.)
 """
 import os
 import sys
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
+# Load secret file from Render if it exists
+secret_env_path = '/etc/secrets/.env'
+if os.path.exists(secret_env_path):
+    load_dotenv(secret_env_path)
+    print("Loaded secret file from /etc/secrets/.env")
+
 from app import app, init_db
 
 def create_app():
