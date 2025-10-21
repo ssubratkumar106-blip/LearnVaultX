@@ -1344,7 +1344,14 @@ if __name__ == '__main__':
         logger.info("Starting Flask-SocketIO server on 127.0.0.1:5000")
         logger.info("Application is ready to accept connections!")
         logger.info("=" * 70)
-        socketio.run(app, host='127.0.0.1', port=5000, debug=True)
+        
+        # Check if running in production (Render, Heroku, etc.)
+        if os.environ.get('PORT'):
+            # Production mode - let Gunicorn handle the server
+            logger.info("Running in production mode - Gunicorn will start the server")
+        else:
+            # Development mode
+            socketio.run(app, host='127.0.0.1', port=5000, debug=True)
     except Exception as e:
         logger.error(f"Unhandled exception in application startup: {e}")
         

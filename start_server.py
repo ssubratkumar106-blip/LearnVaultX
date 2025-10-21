@@ -43,12 +43,24 @@ def main():
     print(f"🌐 Starting server on port {port}")
     print("✅ LearnVaultX is ready!")
     
-    # Start the application
-    app.run(
-        host='0.0.0.0',
-        port=port,
-        debug=False
-    )
+    # Start the application with Gunicorn for production
+    import subprocess
+    import sys
+    
+    # Use Gunicorn for production deployment
+    gunicorn_cmd = [
+        'gunicorn',
+        '--bind', f'0.0.0.0:{port}',
+        '--workers', '2',
+        '--timeout', '120',
+        '--keep-alive', '2',
+        '--max-requests', '1000',
+        '--max-requests-jitter', '100',
+        'app:app'
+    ]
+    
+    print(f"🚀 Starting with Gunicorn: {' '.join(gunicorn_cmd)}")
+    subprocess.run(gunicorn_cmd)
 
 if __name__ == '__main__':
     main()
