@@ -14,6 +14,7 @@
         </div>
         <ul class="nav-menu">
             <li class="active"><a href="#" onclick="showSection('classes')">My Classes</a></li>
+            <li><a href="#" onclick="showSection('interventions')">🚨 Student Alerts</a></li>
             <li><a href="#" onclick="showSection('analytics')">Analytics</a></li>
             <li><a href="#" onclick="showSection('feedback')">View Feedback</a></li>
             <li><a href="/logout">Logout</a></li>
@@ -34,6 +35,18 @@
             
             <div id="classes-grid" class="cards-grid">
                 <!-- Classes will be loaded here -->
+            </div>
+        </section>
+        
+        <!-- Intervention Alerts Section -->
+        <section id="interventions-section" class="dashboard-section hidden">
+            <div class="section-header">
+                <h2>🚨 Student Intervention Alerts</h2>
+                <p style="color: var(--text-muted); font-size: 14px;">AI-detected students who need your attention</p>
+            </div>
+            
+            <div id="interventions-container">
+                <!-- Interventions will be loaded here -->
             </div>
         </section>
         
@@ -130,6 +143,78 @@ async function loadClasses() {
     }
 }
 
+async function loadInterventions() {
+    try {
+        const response = await fetch('/api/teacher/interventions');
+        const interventions = await response.json();
+        
+        const container = document.getElementById('interventions-container');
+        
+        if (interventions.length === 0) {
+            container.innerHTML = '<div class="empty-state"><p>✅ Great! No urgent student alerts at this time.</p></div>';
+            return;
+        }
+        
+        // Group by alert type
+        const byType = {
+            'low_performance': [],
+            'knowledge_gap': [],
+            'disengaged': []
+        };
+        
+        interventions.forEach(alert => {
+            byType[alert.alert_type].push(alert);
+        });
+        
+        const alertLabels = {
+            'low_performance': { icon: '📉', label: 'Low Performance', color: '#ef4444' },
+            'knowledge_gap': { icon: '🎯', label: 'Knowledge Gaps', color: '#f59e0b' },
+            'disengaged': { icon: '⏰', label: 'Disengaged Students', color: '#6b7280' }
+        };
+        
+        container.innerHTML = Object.entries(byType)
+            .filter(([type, alerts]) => alerts.length > 0)
+            .map(([type, alerts]) => {
+                const info = alertLabels[type];
+                return `
+                    <div style="margin-bottom: 30px;">
+                        <h3 style="color: ${info.color}; margin-bottom: 15px;">${info.icon} ${info.label} (${alerts.length})</h3>
+                        <div class="cards-grid">
+                            ${alerts.map(alert => `
+                                <div class="class-card" style="border-left: 4px solid ${info.color};">
+                                    <div style="display: flex; justify-content: space-between; align-items: start;">
+                                        <h3>${alert.student_name}</h3>
+                                        <span class="badge badge-warning">${alert.class_name}</span>
+                                    </div>
+                                    <p style="margin: 10px 0; color: var(--text-muted);">${alert.message}</p>
+                                    <p style="font-size: 12px; color: var(--text-muted);">
+                                        Alert created: ${new Date(alert.created_at).toLocaleDateString()}
+                                    </p>
+                                    <div class="card-actions">
+                                        <button class="btn btn-primary btn-sm" onclick="resolveIntervention(${alert.id})">Mark Resolved</button>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+    } catch (error) {
+        console.error('Error loading interventions:', error);
+        document.getElementById('interventions-container').innerHTML = 
+            '<div class="empty-state"><p>Unable to load interventions. Please try again later.</p></div>';
+    }
+}
+
+async function resolveIntervention(interventionId) {
+    try {
+        await fetch(`/api/teacher/resolve-intervention/${interventionId}`, { method: 'POST' });
+        loadInterventions();
+    } catch (error) {
+        console.error('Error resolving intervention:', error);
+    }
+}
+
 function showSection(section) {
     document.querySelectorAll('.dashboard-section').forEach(s => s.classList.add('hidden'));
     document.querySelectorAll('.nav-menu li').forEach(li => li.classList.remove('active'));
@@ -138,13 +223,17 @@ function showSection(section) {
         document.getElementById('classes-section').classList.remove('hidden');
         document.querySelectorAll('.nav-menu li')[0].classList.add('active');
         loadClasses();
+    } else if (section === 'interventions') {
+        document.getElementById('interventions-section').classList.remove('hidden');
+        document.querySelectorAll('.nav-menu li')[1].classList.add('active');
+        loadInterventions();
     } else if (section === 'analytics') {
         document.getElementById('analytics-section').classList.remove('hidden');
-        document.querySelectorAll('.nav-menu li')[1].classList.add('active');
+        document.querySelectorAll('.nav-menu li')[2].classList.add('active');
         loadAnalytics();
     } else if (section === 'feedback') {
         document.getElementById('feedback-section').classList.remove('hidden');
-        document.querySelectorAll('.nav-menu li')[2].classList.add('active');
+        document.querySelectorAll('.nav-menu li')[3].classList.add('active');
         loadFeedback();
     }
 }

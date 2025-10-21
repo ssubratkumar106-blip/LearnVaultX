@@ -670,11 +670,133 @@ function stopSpeedIndicator() {
     }
 }
 
+// Make network speed indicator draggable
+function makeDraggable(element) {
+    let isDragging = false;
+    let currentX;
+    let currentY;
+    let initialX;
+    let initialY;
+    let xOffset = 0;
+    let yOffset = 0;
+
+    // Load saved position from localStorage
+    const savedPosition = localStorage.getItem('speedIndicatorPosition');
+    if (savedPosition) {
+        const { x, y } = JSON.parse(savedPosition);
+        xOffset = x;
+        yOffset = y;
+        setPosition(x, y);
+    }
+
+    // Mouse events
+    element.addEventListener('mousedown', dragStart);
+    document.addEventListener('mousemove', drag);
+    document.addEventListener('mouseup', dragEnd);
+
+    // Touch events for mobile
+    element.addEventListener('touchstart', dragStart, { passive: false });
+    document.addEventListener('touchmove', drag, { passive: false });
+    document.addEventListener('touchend', dragEnd);
+
+    function dragStart(e) {
+        // Only drag if clicking on the indicator itself, not on links/buttons inside
+        if (e.target.tagName === 'A' || e.target.tagName === 'BUTTON') {
+            return;
+        }
+
+        if (e.type === 'touchstart') {
+            initialX = e.touches[0].clientX - xOffset;
+            initialY = e.touches[0].clientY - yOffset;
+        } else {
+            initialX = e.clientX - xOffset;
+            initialY = e.clientY - yOffset;
+        }
+
+        isDragging = true;
+        element.style.cursor = 'grabbing';
+        e.preventDefault();
+    }
+
+    function drag(e) {
+        if (isDragging) {
+            e.preventDefault();
+
+            if (e.type === 'touchmove') {
+                currentX = e.touches[0].clientX - initialX;
+                currentY = e.touches[0].clientY - initialY;
+            } else {
+                currentX = e.clientX - initialX;
+                currentY = e.clientY - initialY;
+            }
+
+            xOffset = currentX;
+            yOffset = currentY;
+
+            setPosition(currentX, currentY);
+        }
+    }
+
+    function dragEnd(e) {
+        if (isDragging) {
+            // Save position to localStorage
+            localStorage.setItem('speedIndicatorPosition', JSON.stringify({
+                x: xOffset,
+                y: yOffset
+            }));
+
+            isDragging = false;
+            element.style.cursor = 'grab';
+        }
+    }
+
+    function setPosition(x, y) {
+        // Ensure the indicator stays within viewport bounds
+        const rect = element.getBoundingClientRect();
+        const maxX = window.innerWidth - rect.width;
+        const maxY = window.innerHeight - rect.height;
+
+        x = Math.max(0, Math.min(x, maxX));
+        y = Math.max(0, Math.min(y, maxY));
+
+        element.style.position = 'fixed';
+        element.style.left = `${x}px`;
+        element.style.top = `${y}px`;
+        element.style.right = 'auto';
+        element.style.bottom = 'auto';
+    }
+
+    // Add visual hint that it's draggable
+    element.style.cursor = 'grab';
+    element.title = 'Drag to move';
+}
+
+// Reset indicator position (double-click to reset to default)
+function resetIndicatorPosition() {
+    const indicator = document.getElementById('network-speed-indicator');
+    if (indicator) {
+        localStorage.removeItem('speedIndicatorPosition');
+        indicator.style.position = '';
+        indicator.style.left = '';
+        indicator.style.top = '';
+        indicator.style.right = '';
+        indicator.style.bottom = '';
+        alert('Network indicator position reset to default!');
+    }
+}
+
 // Initialize global speed indicator on page load
 document.addEventListener('DOMContentLoaded', () => {
     const indicator = document.getElementById('network-speed-indicator');
     if (indicator) {
         startGlobalSpeedIndicator();
+        makeDraggable(indicator);
+        
+        // Double-click to reset position
+        indicator.addEventListener('dblclick', (e) => {
+            e.preventDefault();
+            resetIndicatorPosition();
+        });
     }
 });
 

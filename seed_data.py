@@ -11,7 +11,25 @@ def seed_database():
     db = sqlite3.connect('education.db')
     cursor = db.cursor()
     
-    print("🌱 Seeding database with demo data...")
+    print("[SEED] Seeding database with demo data...")
+    
+    # Clear existing data (in reverse order to respect foreign key constraints)
+    print("Clearing existing data...")
+    tables = [
+        'ai_context_sessions', 'teacher_interventions', 'topic_mastery', 'learning_paths',
+        'recommendations', 'knowledge_gaps', 'question_topics', 'topics',
+        'messages', 'quiz_submissions', 'quiz_questions', 'quizzes', 'lectures',
+        'enrollments', 'classes', 'users'
+    ]
+    
+    for table in tables:
+        try:
+            cursor.execute(f'DELETE FROM {table}')
+        except:
+            pass  # Table might not exist
+    
+    db.commit()
+    print("[OK] Cleared existing data")
     
     # Create users (teachers and students)
     print("Creating users...")
@@ -37,7 +55,7 @@ def seed_database():
         )
     
     db.commit()
-    print(f"✅ Created {len(users)} users")
+    print(f"[OK] Created {len(users)} users")
     
     # Create classes
     print("Creating classes...")
@@ -55,7 +73,7 @@ def seed_database():
         )
     
     db.commit()
-    print(f"✅ Created {len(classes)} classes")
+    print(f"[OK] Created {len(classes)} classes")
     
     # Enroll students in classes
     print("Enrolling students...")
@@ -75,7 +93,7 @@ def seed_database():
         )
     
     db.commit()
-    print(f"✅ Created {len(enrollments)} enrollments")
+    print(f"[OK] Created {len(enrollments)} enrollments")
     
     # Create some sample lectures (file paths would be actual uploaded files in production)
     print("Creating sample lectures...")
@@ -95,7 +113,7 @@ def seed_database():
         )
     
     db.commit()
-    print(f"✅ Created {len(lectures)} lectures")
+    print(f"[OK] Created {len(lectures)} lectures")
     
     # Create quizzes
     print("Creating quizzes...")
@@ -114,7 +132,7 @@ def seed_database():
         )
     
     db.commit()
-    print(f"✅ Created {len(quizzes)} quizzes")
+    print(f"[OK] Created {len(quizzes)} quizzes")
     
     # Create quiz questions
     print("Creating quiz questions...")
@@ -204,7 +222,7 @@ def seed_database():
         )
     
     db.commit()
-    print(f"✅ Created {len(all_questions)} quiz questions")
+    print(f"[OK] Created {len(all_questions)} quiz questions")
     
     # Create some sample quiz submissions
     print("Creating sample quiz submissions...")
@@ -226,7 +244,7 @@ def seed_database():
         )
     
     db.commit()
-    print(f"✅ Created {len(submissions)} quiz submissions")
+    print(f"[OK] Created {len(submissions)} quiz submissions")
     
     # Create some chat messages
     print("Creating sample chat messages...")
@@ -247,7 +265,76 @@ def seed_database():
         )
     
     db.commit()
-    print(f"✅ Created {len(messages)} chat messages")
+    print(f"[OK] Created {len(messages)} chat messages")
+    
+    # Create Topics for Knowledge Gap Tracking
+    print("Creating topics for adaptive learning...")
+    
+    topics_data = [
+        # DSA Class (class_id=1)
+        (1, 'Arrays', 'Array data structures and operations'),
+        (1, 'Linked Lists', 'Single and double linked lists'),
+        (1, 'Trees', 'Binary trees, BST, and tree traversals'),
+        (1, 'Graphs', 'Graph representations and algorithms'),
+        (1, 'Time Complexity', 'Big O notation and complexity analysis'),
+        
+        # Web Dev Class (class_id=2)
+        (2, 'HTML Basics', 'HTML tags, elements, and structure'),
+        (2, 'CSS Styling', 'CSS selectors, properties, and layout'),
+        (2, 'JavaScript Fundamentals', 'Variables, functions, and control flow'),
+        (2, 'Responsive Design', 'Media queries and mobile-first design'),
+        
+        # AI Class (class_id=3)
+        (3, 'Machine Learning Basics', 'Supervised vs unsupervised learning'),
+        (3, 'Classification Algorithms', 'Decision trees, SVM, KNN'),
+        (3, 'Regression', 'Linear and polynomial regression'),
+        (3, 'Neural Networks', 'Perceptrons and deep learning basics'),
+    ]
+    
+    for class_id, topic_name, description in topics_data:
+        cursor.execute(
+            'INSERT INTO topics (class_id, topic_name, description) VALUES (?, ?, ?)',
+            (class_id, topic_name, description)
+        )
+    
+    db.commit()
+    print(f"[OK] Created {len(topics_data)} topics")
+    
+    # Assign topics to quiz questions (for knowledge gap detection)
+    print("Assigning topics to questions...")
+    
+    # Get question IDs (we know from earlier quiz creation)
+    # Quiz 1 questions (DSA): Array & Time Complexity topics
+    cursor.execute('SELECT id FROM quiz_questions WHERE quiz_id = 1')
+    quiz_1_questions = [row[0] for row in cursor.fetchall()]
+    
+    # Assign to Arrays and Time Complexity topics
+    for q_id in quiz_1_questions[:2]:
+        cursor.execute('INSERT INTO question_topics (question_id, topic_id) VALUES (?, ?)', (q_id, 1))  # Arrays
+    for q_id in quiz_1_questions[2:]:
+        cursor.execute('INSERT INTO question_topics (question_id, topic_id) VALUES (?, ?)', (q_id, 5))  # Time Complexity
+    
+    # Quiz 2 questions (Trees)
+    cursor.execute('SELECT id FROM quiz_questions WHERE quiz_id = 2')
+    quiz_2_questions = [row[0] for row in cursor.fetchall()]
+    for q_id in quiz_2_questions:
+        cursor.execute('INSERT INTO question_topics (question_id, topic_id) VALUES (?, ?)', (q_id, 3))  # Trees
+    
+    # Quiz 3 questions (HTML/CSS)
+    cursor.execute('SELECT id FROM quiz_questions WHERE quiz_id = 3')
+    quiz_3_questions = [row[0] for row in cursor.fetchall()]
+    cursor.execute('INSERT INTO question_topics (question_id, topic_id) VALUES (?, ?)', (quiz_3_questions[0], 6))  # HTML
+    for q_id in quiz_3_questions[1:]:
+        cursor.execute('INSERT INTO question_topics (question_id, topic_id) VALUES (?, ?)', (q_id, 7))  # CSS
+    
+    # Quiz 4 questions (ML)
+    cursor.execute('SELECT id FROM quiz_questions WHERE quiz_id = 4')
+    quiz_4_questions = [row[0] for row in cursor.fetchall()]
+    cursor.execute('INSERT INTO question_topics (question_id, topic_id) VALUES (?, ?)', (quiz_4_questions[0], 10))  # ML Basics
+    cursor.execute('INSERT INTO question_topics (question_id, topic_id) VALUES (?, ?)', (quiz_4_questions[1], 11))  # Classification
+    
+    db.commit()
+    print("[OK] Assigned topics to questions")
     
     # Calculate and insert student metrics
     print("Calculating student metrics...")
@@ -299,23 +386,23 @@ def seed_database():
             ''', (student_id, class_id, round(accuracy * 100, 1), round(avg_time, 1), pace_score, rating))
     
     db.commit()
-    print(f"✅ Calculated metrics for {len(student_class_pairs)} student-class pairs")
+    print(f"[OK] Calculated metrics for {len(student_class_pairs)} student-class pairs")
     
     # Close connection
     db.close()
     
-    print("\n✨ Database seeding complete!")
-    print("\n📋 Demo Accounts:")
-    print("\n👨‍🏫 Teachers:")
+    print("\n[SUCCESS] Database seeding complete!")
+    print("\nDemo Accounts:")
+    print("\nTeachers:")
     print("   teacher1@edu.com / password123")
     print("   teacher2@edu.com / password123")
-    print("\n👨‍🎓 Students:")
+    print("\nStudents:")
     print("   student1@edu.com / password123")
     print("   student2@edu.com / password123")
     print("   student3@edu.com / password123")
     print("   student4@edu.com / password123")
     print("   student5@edu.com / password123")
-    print("\n🚀 Ready to demo! Run: python app.py\n")
+    print("\nReady to demo! Run: python app.py\n")
 
 if __name__ == '__main__':
     seed_database()

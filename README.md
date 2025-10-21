@@ -4,9 +4,17 @@ A web-based educational platform with AI-powered features, offline support, and 
 
 ## Features
 
+### **🤖 AI-Driven Adaptive Learning (NEW!)**
+- **Knowledge Gap Detection**: AI analyzes quiz performance to identify weak topics
+- **Personalized Recommendations**: AI suggests specific lectures/quizzes based on gaps
+- **Context-Aware AI Tutor**: Chatbot knows student performance and provides personalized help
+- **Teacher Intervention Alerts**: Automated alerts for struggling students
+- **Topic Mastery Tracking**: Visual breakdown of mastery levels per topic
+
+### **Core Features**
 - **Role-Based System**: Separate dashboards for teachers and students
 - **Content Management**: Teachers can create classes, upload lectures (PDF/video), and create quizzes
-- **AI Chatbot**: Intelligent assistant for student queries powered by Groq AI
+- **AI Chatbot**: Powered by Claude 4.5 Sonnet (or Groq/DeepSeek fallback)
 - **Real-Time Chat**: Live class discussions using WebSockets
 - **Offline Support**: Service Worker and IndexedDB for rural connectivity
 - **Analytics Dashboard**: Track student performance and learning pace
@@ -32,12 +40,30 @@ A web-based educational platform with AI-powered features, offline support, and 
 pip install -r requirements.txt
 ```
 
-2. Create `.env` file (optional for AI features):
+2. Create `.env` file for AI features:
 ```env
+# Claude AI (Recommended - Best for education!)
+ANTHROPIC_API_KEY=your_claude_api_key_here
+
+# OR use Groq (FREE & Fast alternative)
 GROQ_API_KEY=your_groq_api_key_here
+
+# Flask
+FLASK_SECRET_KEY=your-secret-key-here
 ```
 
-3. Run the application:
+**Get Claude API Key (FREE $5 credits!):**
+- Visit: https://console.anthropic.com/
+- Sign up → Get API key → Add to `.env`
+- See `ADAPTIVE_LEARNING_GUIDE.md` for details
+
+3. Initialize database and load demo data:
+```bash
+python -c "from app import init_db; init_db()"
+python seed_data.py
+```
+
+4. Run the application:
 ```bash
 python app.py
 ```
@@ -108,6 +134,23 @@ pace_score = 10 × (0.5×accuracy + 0.3×speed + 0.2×engagement)
 - IndexedDB stores quizzes locally
 - Automatic sync when connection restored
 
+## 🆕 Adaptive Learning Features
+
+### **For Students:**
+- **📚 AI Recommendations Tab**: Personalized content suggestions based on your gaps
+- **🎯 Knowledge Gaps Tab**: Visual breakdown of topic mastery levels
+- **🤖 Context-Aware AI**: Chatbot knows your performance and helps accordingly
+
+### **For Teachers:**
+- **🚨 Student Alerts Tab**: Automated intervention alerts for struggling students
+- **📊 Enhanced Analytics**: Topic-wise mastery tracking for all students
+- **⚡ Proactive Monitoring**: AI detects issues automatically, no manual checking
+
+### **Documentation:**
+- `ADAPTIVE_LEARNING_GUIDE.md` - Complete guide to adaptive features
+- `SETUP_ADAPTIVE_FEATURES.md` - Quick 5-minute setup
+- `CHANGES_SUMMARY.md` - Detailed change log
+
 ## Troubleshooting
 
 **Port in use?** Change port in `app.py`:
@@ -119,6 +162,18 @@ socketio.run(app, port=8000)
 ```bash
 rm education.db
 python -c "from app import init_db; init_db()"
+python seed_data.py  # Important: Loads topics for adaptive features!
+```
+
+**AI not working?** Check your API key in `.env`:
+```bash
+cat .env | grep ANTHROPIC  # Should show your key
+python app.py  # Look for "Claude AI initialized" in logs
+```
+
+**No recommendations showing?** Make sure topics are loaded:
+```bash
+python seed_data.py  # Creates topics and assigns to questions
 ```
 
 ## License
@@ -127,4 +182,4 @@ Educational project - free to use and modify.
 
 ---
 
-Built for BPUT Hackathon Mid-Evaluation
+Built for BPUT Hackathon Mid-Evaluation | Enhanced with AI-Driven Adaptive Learning

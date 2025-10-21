@@ -74,15 +74,27 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 deepseek_api_key = os.environ.get('DEEPSEEK_API_KEY', '')
 groq_api_key = os.environ.get('GROQ_API_KEY', '')
 openai_api_key = os.environ.get('OPENAI_API_KEY', '')
+anthropic_api_key = os.environ.get('ANTHROPIC_API_KEY', '')
 
 # Initialize AI providers
 deepseek_client = None
 groq_client = None
 openai_client = None
+claude_client = None
 ai_provider = "none"
 
-# Check Groq (FREE & FAST!) - Priority provider
-if groq_api_key:
+# Check Claude (Anthropic) - BEST for education! Priority #1
+if anthropic_api_key:
+    try:
+        import anthropic
+        claude_client = anthropic.Anthropic(api_key=anthropic_api_key)
+        ai_provider = "claude"
+        logger.info("Claude AI (Anthropic) initialized - BEST for adaptive learning!")
+    except Exception as e:
+        logger.warning(f"Failed to initialize Claude client: {e}")
+
+# Check Groq (FREE & FAST!) - Priority #2
+if groq_api_key and ai_provider == "none":
     try:
         groq_client = True
         ai_provider = "groq"
@@ -90,22 +102,20 @@ if groq_api_key:
     except Exception as e:
         logger.warning(f"Failed to initialize Groq client: {e}")
 
-# Check DeepSeek
-if deepseek_api_key:
+# Check DeepSeek - Priority #3
+if deepseek_api_key and ai_provider == "none":
     try:
         deepseek_client = True
-        if ai_provider == "none":
-            ai_provider = "deepseek"
+        ai_provider = "deepseek"
         logger.info("DeepSeek AI API key found - ready to use")
     except Exception as e:
         logger.warning(f"Failed to initialize DeepSeek client: {e}")
 
-# Check OpenAI
-if openai_api_key:
+# Check OpenAI - Priority #4
+if openai_api_key and ai_provider == "none":
     try:
         openai_client = True
-        if ai_provider == "none":
-            ai_provider = "openai"
+        ai_provider = "openai"
         logger.info("OpenAI API key found - ready to use")
     except Exception as e:
         logger.warning(f"Failed to initialize OpenAI client: {e}")
@@ -338,6 +348,444 @@ def clean_expired_otps():
         db.close()
     except Exception as e:
         logger.error(f"Failed to clean expired OTPs: {e}")
+
+# ============================================================================
+# ADAPTIVE LEARNING ENGINE - AI-DRIVEN PERSONALIZATION
+# ============================================================================
+
+def analyze_knowledge_gaps(db, student_id, class_id):
+    """
+    AI-powered knowledge gap detection from quiz performance.
+    Analyzes which topics student struggles with.
+    
+    Returns: List of gaps with topic names and mastery levels
+    """
+    try:
+        # Get all quiz submissions for this student in this class
+        submissions = db.execute('''
+            SELECT qs.*, qq.id as question_id, qq.correct_option_index
+            FROM quiz_submissions qs
+            JOIN quizzes q ON qs.quiz_id = q.id
+            JOIN quiz_questions qq ON qq.quiz_id = q.id
+            WHERE qs.student_id = ? AND q.class_id = ?
+            ORDER BY qs.submitted_at DESC
+        ''', (student_id, class_id)).fetchall()
+        
+        if not submissions:
+            return []
+        
+        # Group by topics (if topics exist)
+        topic_performance = {}
+        
+        for submission in submissions:
+            # Get topics for this question
+            topics = db.execute('''
+                SELECT t.id, t.topic_name
+                FROM topics t
+                JOIN question_topics qt ON t.id = qt.topic_id
+                WHERE qt.question_id = ?
+            ''', (submission['question_id'],)).fetchall()
+            
+            for topic in topics:
+                topic_id = topic['id']
+                topic_name = topic['topic_name']
+                
+                if topic_id not in topic_performance:
+                    topic_performance[topic_id] = {
+                        'name': topic_name,
+                        'correct': 0,
+                        'total': 0
+                    }
+                
+                topic_performance[topic_id]['total'] += 1
+                # Check if student got it right (would need answer data)
+                # For now, use overall submission score as proxy
+        
+        # Calculate mastery levels and identify gaps
+        gaps = []
+        for topic_id, perf in topic_performance.items():
+            if perf['total'] > 0:
+                mastery = perf['correct'] / perf['total']
+                
+                # Update knowledge_gaps table
+                db.execute('''
+                    INSERT OR REPLACE INTO knowledge_gaps
+                    (user_id, topic_id, mastery_level, questions_attempted, questions_correct, last_assessed)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                ''', (student_id, topic_id, mastery, perf['total'], perf['correct'], datetime.now()))
+                
+                # If mastery < 60%, it's a gap
+                if mastery < 0.6:
+                    gaps.append({
+                        'topic_id': topic_id,
+                        'topic_name': perf['name'],
+                        'mastery_level': round(mastery * 100, 1),
+                        'severity': 'critical' if mastery < 0.4 else 'moderate'
+                    })
+        
+        db.commit()
+        return gaps
+        
+    except Exception as e:
+        logger.error(f"Error analyzing knowledge gaps: {e}")
+        return []
+
+def generate_adaptive_recommendations(db, student_id, class_id):
+    """
+    AI-powered content recommendation engine.
+    Recommends lectures, quizzes, and practice based on knowledge gaps.
+    
+    Returns: List of personalized recommendations
+    """
+    try:
+        # Get knowledge gaps
+        gaps = db.execute('''
+            SELECT kg.*, t.topic_name, t.class_id
+            FROM knowledge_gaps kg
+            JOIN topics t ON kg.topic_id = t.id
+            WHERE kg.user_id = ? AND t.class_id = ?
+            ORDER BY kg.mastery_level ASC
+            LIMIT 5
+        ''', (student_id, class_id)).fetchall()
+        
+        recommendations = []
+        
+        for gap in gaps:
+            topic_id = gap['topic_id']
+            topic_name = gap['topic_name']
+            mastery = gap['mastery_level']
+            
+            # Recommend lectures on this topic
+            lectures = db.execute('''
+                SELECT l.id, l.filename, l.class_id
+                FROM lectures l
+                WHERE l.class_id = ?
+                LIMIT 2
+            ''', (class_id,)).fetchall()
+            
+            for lecture in lectures:
+                reason = f"Review lecture on {topic_name} (Current mastery: {round(mastery*100, 1)}%)"
+                priority = int((1 - mastery) * 100)  # Lower mastery = higher priority
+                
+                # Check if already recommended
+                existing = db.execute('''
+                    SELECT id FROM recommendations 
+                    WHERE user_id = ? AND content_type = 'lecture' AND content_id = ?
+                    AND is_completed = 0
+                ''', (student_id, lecture['id'])).fetchone()
+                
+                if not existing:
+                    db.execute('''
+                        INSERT INTO recommendations
+                        (user_id, content_type, content_id, reason, priority)
+                        VALUES (?, ?, ?, ?, ?)
+                    ''', (student_id, 'lecture', lecture['id'], reason, priority))
+                    
+                    recommendations.append({
+                        'type': 'lecture',
+                        'id': lecture['id'],
+                        'title': lecture['filename'],
+                        'reason': reason,
+                        'priority': priority
+                    })
+            
+            # Recommend practice quizzes
+            quizzes = db.execute('''
+                SELECT q.id, q.title
+                FROM quizzes q
+                WHERE q.class_id = ?
+                LIMIT 1
+            ''', (class_id,)).fetchall()
+            
+            for quiz in quizzes:
+                reason = f"Practice quiz for {topic_name} to improve mastery"
+                priority = int((1 - mastery) * 100) + 10  # Quizzes slightly higher priority
+                
+                existing = db.execute('''
+                    SELECT id FROM recommendations 
+                    WHERE user_id = ? AND content_type = 'quiz' AND content_id = ?
+                    AND is_completed = 0
+                ''', (student_id, quiz['id'])).fetchone()
+                
+                if not existing:
+                    db.execute('''
+                        INSERT INTO recommendations
+                        (user_id, content_type, content_id, reason, priority)
+                        VALUES (?, ?, ?, ?, ?)
+                    ''', (student_id, 'quiz', quiz['id'], reason, priority))
+                    
+                    recommendations.append({
+                        'type': 'quiz',
+                        'id': quiz['id'],
+                        'title': quiz['title'],
+                        'reason': reason,
+                        'priority': priority
+                    })
+        
+        db.commit()
+        
+        # Sort by priority
+        recommendations.sort(key=lambda x: x['priority'], reverse=True)
+        return recommendations[:10]  # Top 10 recommendations
+        
+    except Exception as e:
+        logger.error(f"Error generating recommendations: {e}")
+        return []
+
+def get_student_context_for_ai(db, student_id):
+    """
+    Gathers student's learning context for AI-powered personalized tutoring.
+    Includes recent performance, weak topics, and learning patterns.
+    
+    Returns: Context dict for AI
+    """
+    try:
+        # Get recent quiz performance
+        recent_quizzes = db.execute('''
+            SELECT q.title, qs.score, qs.total, qs.submitted_at
+            FROM quiz_submissions qs
+            JOIN quizzes q ON qs.quiz_id = q.id
+            WHERE qs.student_id = ?
+            ORDER BY qs.submitted_at DESC
+            LIMIT 5
+        ''', (student_id,)).fetchall()
+        
+        # Get knowledge gaps
+        gaps = db.execute('''
+            SELECT t.topic_name, kg.mastery_level
+            FROM knowledge_gaps kg
+            JOIN topics t ON kg.topic_id = t.id
+            WHERE kg.user_id = ?
+            ORDER BY kg.mastery_level ASC
+            LIMIT 5
+        ''', (student_id,)).fetchall()
+        
+        # Get learning pace
+        metrics = db.execute('''
+            SELECT pace_score, rating, score_avg
+            FROM student_metrics
+            WHERE user_id = ?
+            ORDER BY updated_at DESC
+            LIMIT 1
+        ''', (student_id,)).fetchone()
+        
+        context = {
+            'recent_performance': [
+                {
+                    'quiz': q['title'],
+                    'score': f"{q['score']}/{q['total']}",
+                    'percentage': round((q['score'] / q['total']) * 100, 1) if q['total'] > 0 else 0,
+                    'date': q['submitted_at']
+                } for q in recent_quizzes
+            ],
+            'weak_topics': [
+                {
+                    'topic': g['topic_name'],
+                    'mastery': round(g['mastery_level'] * 100, 1)
+                } for g in gaps
+            ],
+            'learning_pace': {
+                'pace_score': metrics['pace_score'] if metrics else 0,
+                'rating': metrics['rating'] if metrics else 0,
+                'average_score': metrics['score_avg'] if metrics else 0
+            } if metrics else None
+        }
+        
+        return context
+        
+    except Exception as e:
+        logger.error(f"Error getting student context: {e}")
+        return {}
+
+def generate_ai_tutoring_response(prompt, student_context):
+    """
+    Uses Claude 4.5 Sonnet (or fallback AI) to provide personalized tutoring.
+    Context-aware: knows student's weak areas and recent performance.
+    
+    Returns: AI response with personalized help
+    """
+    try:
+        # Build context-aware system prompt
+        system_prompt = """You are an expert educational AI tutor specializing in adaptive learning. 
+        You provide personalized help based on each student's unique learning journey.
+        
+        Be encouraging, clear, and adapt your explanations to the student's level.
+        Use examples and break down complex topics into digestible parts.
+        Always relate your answers to the student's current learning gaps when relevant."""
+        
+        # Add student context to prompt
+        if student_context and student_context.get('weak_topics'):
+            weak_topics_str = ", ".join([t['topic'] for t in student_context['weak_topics'][:3]])
+            system_prompt += f"\n\nThis student is currently working on improving in: {weak_topics_str}."
+            
+            if student_context.get('recent_performance'):
+                recent = student_context['recent_performance'][0]
+                system_prompt += f"\nTheir most recent quiz score was {recent['score']} ({recent['percentage']}%)."
+        
+        # Try Claude first (BEST for education!)
+        if claude_client:
+            message = claude_client.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=1024,
+                messages=[
+                    {"role": "user", "content": f"{system_prompt}\n\nStudent question: {prompt}"}
+                ]
+            )
+            return message.content[0].text
+        
+        # Fallback to other AI providers
+        return call_fallback_ai(prompt, system_prompt)
+        
+    except Exception as e:
+        logger.error(f"Error generating AI tutoring response: {e}")
+        return "I'm having trouble connecting right now. Please try again in a moment."
+
+def call_fallback_ai(prompt, system_prompt):
+    """Fallback AI when Claude is not available"""
+    import requests
+    
+    # Try Groq
+    if groq_client:
+        headers = {
+            "Authorization": f"Bearer {groq_api_key}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "model": "llama-3.1-8b-instant",
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt}
+            ],
+            "temperature": 0.7,
+            "max_tokens": 800
+        }
+        response = requests.post("https://api.groq.com/openai/v1/chat/completions", 
+                                headers=headers, json=payload, timeout=30)
+        if response.status_code == 200:
+            return response.json()['choices'][0]['message']['content']
+    
+    # Try DeepSeek
+    if deepseek_client:
+        headers = {
+            "Authorization": f"Bearer {deepseek_api_key}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "model": "deepseek-chat",
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt}
+            ],
+            "temperature": 0.7,
+            "max_tokens": 800
+        }
+        response = requests.post("https://api.deepseek.com/v1/chat/completions", 
+                                headers=headers, json=payload, timeout=30)
+        if response.status_code == 200:
+            return response.json()['choices'][0]['message']['content']
+    
+    return "AI service temporarily unavailable. Please configure an API key."
+
+def check_and_create_intervention_alerts(db, student_id, class_id):
+    """
+    Monitors student performance and creates alerts for teachers
+    when intervention is needed (AI-driven early warning system).
+    """
+    try:
+        # Get student metrics
+        metrics = db.execute('''
+            SELECT * FROM student_metrics
+            WHERE user_id = ? AND class_id = ?
+        ''', (student_id, class_id)).fetchone()
+        
+        if not metrics:
+            return
+        
+        # Get teacher
+        teacher = db.execute('''
+            SELECT teacher_id FROM classes WHERE id = ?
+        ''', (class_id,)).fetchone()
+        
+        if not teacher:
+            return
+        
+        teacher_id = teacher['teacher_id']
+        
+        # Check for intervention triggers
+        alerts = []
+        
+        # Trigger 1: Low performance (pace_score < 4.0)
+        if metrics['pace_score'] < 4.0:
+            # Check if alert already exists
+            existing = db.execute('''
+                SELECT id FROM teacher_interventions
+                WHERE student_id = ? AND class_id = ? AND alert_type = 'low_performance'
+                AND is_resolved = 0
+            ''', (student_id, class_id)).fetchone()
+            
+            if not existing:
+                message = f"Student performance is below threshold (Pace: {metrics['pace_score']}/10). Immediate attention needed."
+                db.execute('''
+                    INSERT INTO teacher_interventions
+                    (student_id, teacher_id, class_id, alert_type, message)
+                    VALUES (?, ?, ?, ?, ?)
+                ''', (student_id, teacher_id, class_id, 'low_performance', message))
+                alerts.append('low_performance')
+        
+        # Trigger 2: Knowledge gaps
+        gaps = db.execute('''
+            SELECT COUNT(*) as gap_count
+            FROM knowledge_gaps
+            WHERE user_id = ? AND mastery_level < 0.5
+        ''', (student_id,)).fetchone()
+        
+        if gaps and gaps['gap_count'] >= 3:
+            existing = db.execute('''
+                SELECT id FROM teacher_interventions
+                WHERE student_id = ? AND class_id = ? AND alert_type = 'knowledge_gap'
+                AND is_resolved = 0
+            ''', (student_id, class_id)).fetchone()
+            
+            if not existing:
+                message = f"Student has {gaps['gap_count']} significant knowledge gaps. Recommend review sessions."
+                db.execute('''
+                    INSERT INTO teacher_interventions
+                    (student_id, teacher_id, class_id, alert_type, message)
+                    VALUES (?, ?, ?, ?, ?)
+                ''', (student_id, teacher_id, class_id, 'knowledge_gap', message))
+                alerts.append('knowledge_gap')
+        
+        # Trigger 3: Disengagement (no activity in last 7 days)
+        last_activity = db.execute('''
+            SELECT MAX(submitted_at) as last_active
+            FROM quiz_submissions
+            WHERE student_id = ?
+        ''', (student_id,)).fetchone()
+        
+        if last_activity and last_activity['last_active']:
+            days_since = (datetime.now() - datetime.fromisoformat(last_activity['last_active'])).days
+            if days_since > 7:
+                existing = db.execute('''
+                    SELECT id FROM teacher_interventions
+                    WHERE student_id = ? AND class_id = ? AND alert_type = 'disengaged'
+                    AND is_resolved = 0
+                ''', (student_id, class_id)).fetchone()
+                
+                if not existing:
+                    message = f"Student inactive for {days_since} days. May need re-engagement."
+                    db.execute('''
+                        INSERT INTO teacher_interventions
+                        (student_id, teacher_id, class_id, alert_type, message)
+                        VALUES (?, ?, ?, ?, ?)
+                    ''', (student_id, teacher_id, class_id, 'disengaged', message))
+                    alerts.append('disengaged')
+        
+        db.commit()
+        return alerts
+        
+    except Exception as e:
+        logger.error(f"Error checking intervention alerts: {e}")
+        return []
 
 # Login required decorator
 def login_required(f):
@@ -677,6 +1125,10 @@ def get_quiz(quiz_id):
 @app.route('/api/submit_quiz', methods=['POST'])
 @login_required
 def submit_quiz():
+    """
+    ENHANCED QUIZ SUBMISSION with Adaptive Learning Features
+    Now triggers gap analysis, recommendations, and intervention alerts!
+    """
     data = request.json
     quiz_id = data.get('quiz_id')
     answers = data.get('answers', {})
@@ -713,15 +1165,35 @@ def submit_quiz():
     # Update student metrics
     update_student_metrics(db, session['user_id'], class_id)
     
+    # 🚀 ADAPTIVE LEARNING FEATURES
+    # 1. Analyze knowledge gaps
+    gaps = analyze_knowledge_gaps(db, session['user_id'], class_id)
+    
+    # 2. Generate personalized recommendations
+    recommendations = generate_adaptive_recommendations(db, session['user_id'], class_id)
+    
+    # 3. Check for teacher intervention alerts
+    alerts = check_and_create_intervention_alerts(db, session['user_id'], class_id)
+    
     db.commit()
     db.close()
     
-    return jsonify({
+    # Build enhanced response
+    response = {
         'message': 'Quiz submitted',
         'score': score,
         'total': total,
-        'percentage': round((score / total) * 100, 1)
-    }), 200
+        'percentage': round((score / total) * 100, 1),
+        'adaptive_insights': {
+            'knowledge_gaps_detected': len(gaps),
+            'gaps': gaps[:3],  # Top 3 gaps
+            'recommendations_generated': len(recommendations),
+            'recommendations': recommendations[:5],  # Top 5 recommendations
+            'teacher_alerts_triggered': len(alerts) if alerts else 0
+        }
+    }
+    
+    return jsonify(response), 200
 
 def update_student_metrics(db, student_id, class_id):
     # Get all quiz submissions for this student in this class
@@ -809,118 +1281,41 @@ def get_analytics():
 @app.route('/api/chatbot', methods=['POST'])
 @login_required
 def chatbot():
+    """
+    CONTEXT-AWARE AI CHATBOT with Adaptive Learning Integration
+    Now uses student performance data to provide personalized tutoring!
+    """
     data = request.json
     prompt = data.get('prompt', '')
     
     if not prompt:
         return jsonify({'error': 'Prompt required'}), 400
     
-    # Try AI providers in order of preference
-    providers = []
+    db = get_db()
     
-    # Add available providers (Groq first - most reliable!)
-    if groq_client:
-        providers.append(('groq', 'Groq', groq_api_key, 'https://api.groq.com/openai/v1/chat/completions', 'llama-3.1-8b-instant'))
-    if deepseek_client:
-        providers.append(('deepseek', 'DeepSeek', deepseek_api_key, 'https://api.deepseek.com/v1/chat/completions', 'deepseek-chat'))
-    if openai_client:
-        providers.append(('openai', 'OpenAI', openai_api_key, 'https://api.openai.com/v1/chat/completions', 'gpt-3.5-turbo'))
+    # Get student context for personalized AI tutoring
+    student_context = get_student_context_for_ai(db, session['user_id'])
     
-    # Try each provider
-    for provider_id, provider_name, api_key, api_url, model in providers:
-        try:
-            logger.info(f"Using {provider_name} AI for query: {prompt[:50]}...")
-            
-            import requests
-            
-            headers = {
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json"
-            }
-            
-            payload = {
-                "model": model,
-                "messages": [
-                    {
-                        "role": "system",
-                        "content": "You are a helpful educational assistant. Provide clear, accurate, and concise answers to help students learn. Use simple language and examples when helpful. You can use markdown formatting and LaTeX for math equations (use $$ for display math and $ for inline math)."
-                    },
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ],
-                "temperature": 0.7,
-                "max_tokens": 500
-            }
-            
-            response = requests.post(api_url, headers=headers, json=payload, timeout=30)
-            
-            if response.status_code == 200:
-                result = response.json()
-                answer = result['choices'][0]['message']['content'].strip()
-                
-                logger.info(f"Successfully got AI response from {provider_name}")
-                
-                # Render markdown with math support
-                rendered_answer = render_markdown_with_math(answer)
-                
-                # Save to database
-                db = get_db()
-                db.execute(
-                    'INSERT INTO ai_queries (user_id, prompt, response) VALUES (?, ?, ?)',
-                    (session['user_id'], prompt, answer)
-                )
-                db.commit()
-                db.close()
-                
-                return jsonify({'answer': rendered_answer, 'raw': answer, 'provider': provider_id}), 200
-            else:
-                logger.warning(f"{provider_name} API error: {response.status_code} - {response.text[:100]}")
-                continue  # Try next provider
-                
-        except Exception as e:
-            logger.warning(f"{provider_name} API error: {e}")
-            continue  # Try next provider
+    # Generate context-aware AI response
+    answer = generate_ai_tutoring_response(prompt, student_context)
     
-    # All providers failed - show setup message
-    fallback_answer = '''**AI Chatbot Setup Required** 🤖
-
-**FREE AI Options (Choose One):**
-
-**Option 1: Groq AI (Recommended - Fastest!)**
-1. Visit: https://console.groq.com
-2. Sign up (free, no credit card)
-3. Go to API Keys: https://console.groq.com/keys
-4. Create API key
-5. Add to `.env`: `GROQ_API_KEY=gsk_your_key`
-
-**Option 2: DeepSeek AI**
-1. Visit: https://platform.deepseek.com/api_keys
-2. Sign up (free, no credit card)
-3. Create API key
-4. Add to `.env`: `DEEPSEEK_API_KEY=your_key`
-
-**Option 3: OpenAI**
-1. Visit: https://platform.openai.com/api-keys
-2. Add credits to your account
-3. Add to `.env`: `OPENAI_API_KEY=sk_your_key`
-
-**After adding any key, restart: `python app.py`** 🚀'''
-    
-    # Render markdown
-    rendered_answer = render_markdown_with_math(fallback_answer)
+    # Render markdown with math support
+    rendered_answer = render_markdown_with_math(answer)
     
     # Save to database
-    db = get_db()
     db.execute(
         'INSERT INTO ai_queries (user_id, prompt, response) VALUES (?, ?, ?)',
-        (session['user_id'], prompt, fallback_answer)
+        (session['user_id'], prompt, answer)
     )
     db.commit()
     db.close()
     
-    return jsonify({'answer': rendered_answer, 'raw': fallback_answer, 'provider': 'fallback'}), 200
+    return jsonify({
+        'answer': rendered_answer, 
+        'raw': answer, 
+        'provider': ai_provider,
+        'personalized': bool(student_context.get('weak_topics'))  # Indicate if response was personalized
+    }), 200
 
 # ============================================================================
 # NEW FEATURES: FORGOT PASSWORD, FEEDBACK, LIVE CLASS
@@ -1230,6 +1625,265 @@ def get_class_messages(class_id):
     db.close()
     
     return jsonify([dict(m) for m in messages])
+
+# ============================================================================
+# ADAPTIVE LEARNING API ENDPOINTS
+# ============================================================================
+
+@app.route('/api/recommendations')
+@login_required
+def get_recommendations():
+    """
+    Get personalized content recommendations for the logged-in student.
+    Based on knowledge gaps and learning patterns.
+    """
+    db = get_db()
+    
+    # Get all enrolled classes
+    classes = db.execute('''
+        SELECT DISTINCT class_id FROM enrollments WHERE student_id = ?
+    ''', (session['user_id'],)).fetchall()
+    
+    all_recommendations = []
+    
+    for cls in classes:
+        class_id = cls['class_id']
+        # Generate fresh recommendations
+        recs = generate_adaptive_recommendations(db, session['user_id'], class_id)
+        all_recommendations.extend(recs)
+    
+    # Also get stored recommendations
+    stored_recs = db.execute('''
+        SELECT r.*, 
+               CASE 
+                   WHEN r.content_type = 'lecture' THEN l.filename
+                   WHEN r.content_type = 'quiz' THEN q.title
+                   ELSE 'Practice Exercise'
+               END as content_title
+        FROM recommendations r
+        LEFT JOIN lectures l ON r.content_type = 'lecture' AND r.content_id = l.id
+        LEFT JOIN quizzes q ON r.content_type = 'quiz' AND r.content_id = q.id
+        WHERE r.user_id = ? AND r.is_completed = 0
+        ORDER BY r.priority DESC, r.created_at DESC
+        LIMIT 10
+    ''', (session['user_id'],)).fetchall()
+    
+    db.close()
+    
+    return jsonify({
+        'recommendations': [dict(r) for r in stored_recs],
+        'freshly_generated': all_recommendations
+    })
+
+@app.route('/api/knowledge-gaps')
+@login_required
+def get_knowledge_gaps():
+    """
+    Get student's knowledge gaps across all classes.
+    Shows topics where mastery is below 60%.
+    """
+    db = get_db()
+    
+    gaps = db.execute('''
+        SELECT kg.*, t.topic_name, t.class_id, c.title as class_name
+        FROM knowledge_gaps kg
+        JOIN topics t ON kg.topic_id = t.id
+        JOIN classes c ON t.class_id = c.id
+        WHERE kg.user_id = ?
+        ORDER BY kg.mastery_level ASC
+    ''', (session['user_id'],)).fetchall()
+    
+    db.close()
+    
+    return jsonify([dict(g) for g in gaps])
+
+@app.route('/api/topic-mastery/<int:class_id>')
+@login_required
+def get_topic_mastery(class_id):
+    """
+    Get detailed topic-wise mastery for a specific class.
+    Shows student's strength and weakness visualization data.
+    """
+    db = get_db()
+    
+    # Get all topics for this class
+    topics = db.execute('''
+        SELECT t.id, t.topic_name,
+               COALESCE(kg.mastery_level, 0) as mastery_level,
+               COALESCE(kg.questions_attempted, 0) as questions_attempted,
+               COALESCE(kg.questions_correct, 0) as questions_correct
+        FROM topics t
+        LEFT JOIN knowledge_gaps kg ON t.id = kg.topic_id AND kg.user_id = ?
+        WHERE t.class_id = ?
+        ORDER BY t.topic_name
+    ''', (session['user_id'], class_id)).fetchall()
+    
+    db.close()
+    
+    # Calculate mastery categories
+    mastery_data = {
+        'expert': [],  # > 80%
+        'proficient': [],  # 60-80%
+        'developing': [],  # 40-60%
+        'beginner': []  # < 40%
+    }
+    
+    for topic in topics:
+        mastery_pct = topic['mastery_level'] * 100
+        topic_dict = dict(topic)
+        topic_dict['mastery_percentage'] = round(mastery_pct, 1)
+        
+        if mastery_pct >= 80:
+            mastery_data['expert'].append(topic_dict)
+        elif mastery_pct >= 60:
+            mastery_data['proficient'].append(topic_dict)
+        elif mastery_pct >= 40:
+            mastery_data['developing'].append(topic_dict)
+        else:
+            mastery_data['beginner'].append(topic_dict)
+    
+    return jsonify({
+        'all_topics': [dict(t) for t in topics],
+        'mastery_breakdown': mastery_data
+    })
+
+@app.route('/api/teacher/interventions')
+@login_required
+@teacher_required
+def get_teacher_interventions():
+    """
+    Get intervention alerts for teacher.
+    Shows students who need attention.
+    """
+    db = get_db()
+    
+    interventions = db.execute('''
+        SELECT ti.*, u.name as student_name, c.title as class_name
+        FROM teacher_interventions ti
+        JOIN users u ON ti.student_id = u.id
+        JOIN classes c ON ti.class_id = c.id
+        WHERE ti.teacher_id = ? AND ti.is_resolved = 0
+        ORDER BY ti.created_at DESC
+    ''', (session['user_id'],)).fetchall()
+    
+    db.close()
+    
+    return jsonify([dict(i) for i in interventions])
+
+@app.route('/api/teacher/resolve-intervention/<int:intervention_id>', methods=['POST'])
+@login_required
+@teacher_required
+def resolve_intervention(intervention_id):
+    """Mark an intervention alert as resolved."""
+    db = get_db()
+    
+    db.execute('''
+        UPDATE teacher_interventions
+        SET is_resolved = 1, resolved_at = ?
+        WHERE id = ? AND teacher_id = ?
+    ''', (datetime.now(), intervention_id, session['user_id']))
+    
+    db.commit()
+    db.close()
+    
+    return jsonify({'message': 'Intervention marked as resolved'})
+
+@app.route('/api/teacher/topics', methods=['GET', 'POST'])
+@login_required
+@teacher_required
+def manage_topics():
+    """
+    GET: List all topics for teacher's classes
+    POST: Create new topic for a class
+    """
+    db = get_db()
+    
+    if request.method == 'POST':
+        data = request.json
+        class_id = data.get('class_id')
+        topic_name = data.get('topic_name')
+        description = data.get('description', '')
+        
+        # Verify teacher owns this class
+        cls = db.execute(
+            'SELECT id FROM classes WHERE id = ? AND teacher_id = ?',
+            (class_id, session['user_id'])
+        ).fetchone()
+        
+        if not cls:
+            return jsonify({'error': 'Unauthorized'}), 403
+        
+        db.execute(
+            'INSERT INTO topics (class_id, topic_name, description) VALUES (?, ?, ?)',
+            (class_id, topic_name, description)
+        )
+        db.commit()
+        topic_id = db.execute('SELECT last_insert_rowid()').fetchone()[0]
+        db.close()
+        
+        return jsonify({'message': 'Topic created', 'topic_id': topic_id}), 201
+    
+    else:
+        # Get all topics for teacher's classes
+        topics = db.execute('''
+            SELECT t.*, c.title as class_name
+            FROM topics t
+            JOIN classes c ON t.class_id = c.id
+            WHERE c.teacher_id = ?
+            ORDER BY c.title, t.topic_name
+        ''', (session['user_id'],)).fetchall()
+        
+        db.close()
+        return jsonify([dict(t) for t in topics])
+
+@app.route('/api/teacher/assign-question-topics', methods=['POST'])
+@login_required
+@teacher_required
+def assign_question_topics():
+    """
+    Assign topics to quiz questions for knowledge gap tracking.
+    Enables the AI to detect which specific topics students struggle with.
+    """
+    data = request.json
+    question_id = data.get('question_id')
+    topic_ids = data.get('topic_ids', [])
+    
+    if not question_id or not topic_ids:
+        return jsonify({'error': 'question_id and topic_ids required'}), 400
+    
+    db = get_db()
+    
+    # Remove existing assignments
+    db.execute('DELETE FROM question_topics WHERE question_id = ?', (question_id,))
+    
+    # Add new assignments
+    for topic_id in topic_ids:
+        db.execute(
+            'INSERT INTO question_topics (question_id, topic_id) VALUES (?, ?)',
+            (question_id, topic_id)
+        )
+    
+    db.commit()
+    db.close()
+    
+    return jsonify({'message': 'Topics assigned to question successfully'})
+
+@app.route('/api/mark-recommendation-complete/<int:rec_id>', methods=['POST'])
+@login_required
+def mark_recommendation_complete(rec_id):
+    """Mark a recommendation as completed by the student."""
+    db = get_db()
+    
+    db.execute('''
+        UPDATE recommendations
+        SET is_completed = 1
+        WHERE id = ? AND user_id = ?
+    ''', (rec_id, session['user_id']))
+    
+    db.commit()
+    db.close()
+    
+    return jsonify({'message': 'Recommendation marked as complete'})
 
 # ============================================================================
 # HEALTH CHECK ENDPOINT

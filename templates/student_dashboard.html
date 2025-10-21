@@ -38,6 +38,8 @@
         </div>
         <ul class="nav-menu">
             <li class="active"><a href="#" onclick="showSection('my-classes')">My Classes</a></li>
+            <li><a href="#" onclick="showSection('recommendations')">📚 AI Recommendations</a></li>
+            <li><a href="#" onclick="showSection('knowledge-gaps')">🎯 Knowledge Gaps</a></li>
             <li><a href="#" onclick="showSection('available-classes')">Join Classes</a></li>
             <li><a href="#" onclick="showSection('progress')">My Progress</a></li>
             <li><a href="/logout">Logout</a></li>
@@ -57,6 +59,30 @@
             
             <div id="my-classes-grid" class="cards-grid">
                 <!-- Classes will be loaded here -->
+            </div>
+        </section>
+        
+        <!-- AI Recommendations Section -->
+        <section id="recommendations-section" class="dashboard-section hidden">
+            <div class="section-header">
+                <h2>📚 Personalized Recommendations</h2>
+                <p style="color: var(--text-muted); font-size: 14px;">AI-powered suggestions based on your learning gaps</p>
+            </div>
+            
+            <div id="recommendations-container">
+                <!-- Recommendations will be loaded here -->
+            </div>
+        </section>
+        
+        <!-- Knowledge Gaps Section -->
+        <section id="knowledge-gaps-section" class="dashboard-section hidden">
+            <div class="section-header">
+                <h2>🎯 Knowledge Gaps Analysis</h2>
+                <p style="color: var(--text-muted); font-size: 14px;">Topics where you need more practice</p>
+            </div>
+            
+            <div id="knowledge-gaps-container">
+                <!-- Knowledge gaps will be loaded here -->
             </div>
         </section>
         
@@ -218,22 +244,145 @@ async function loadProgress() {
     }
 }
 
+async function loadRecommendations() {
+    try {
+        const response = await fetch('/api/recommendations');
+        const data = await response.json();
+        
+        const container = document.getElementById('recommendations-container');
+        
+        const recommendations = data.recommendations || [];
+        
+        if (recommendations.length === 0) {
+            container.innerHTML = '<div class="empty-state"><p>✨ Great job! No urgent recommendations right now. Keep taking quizzes to get personalized suggestions!</p></div>';
+            return;
+        }
+        
+        container.innerHTML = `
+            <div class="cards-grid">
+                ${recommendations.map(rec => `
+                    <div class="class-card" style="border-left: 4px solid ${rec.priority > 70 ? '#ef4444' : '#f59e0b'};">
+                        <div style="display: flex; justify-content: space-between; align-items: start;">
+                            <h3>${rec.content_type === 'lecture' ? '📄' : '📝'} ${rec.content_title || 'Recommended Content'}</h3>
+                            <span class="badge ${rec.priority > 70 ? 'badge-warning' : 'badge-success'}">
+                                Priority: ${rec.priority}
+                            </span>
+                        </div>
+                        <p style="margin: 10px 0; color: var(--text-muted);">${rec.reason}</p>
+                        <div class="card-actions">
+                            ${rec.content_type === 'lecture' ? 
+                                `<button class="btn btn-primary btn-sm" onclick="window.location.href='/class/${rec.content_id}'">View Lecture</button>` :
+                                `<button class="btn btn-primary btn-sm" onclick="window.location.href='/class/${rec.content_id}'">Take Quiz</button>`
+                            }
+                            <button class="btn btn-secondary btn-sm" onclick="markRecommendationComplete(${rec.id})">Mark Complete</button>
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+    } catch (error) {
+        console.error('Error loading recommendations:', error);
+        document.getElementById('recommendations-container').innerHTML = 
+            '<div class="empty-state"><p>Unable to load recommendations. Please try again later.</p></div>';
+    }
+}
+
+async function markRecommendationComplete(recId) {
+    try {
+        await fetch(`/api/mark-recommendation-complete/${recId}`, { method: 'POST' });
+        loadRecommendations();
+    } catch (error) {
+        console.error('Error marking complete:', error);
+    }
+}
+
+async function loadKnowledgeGaps() {
+    try {
+        const response = await fetch('/api/knowledge-gaps');
+        const gaps = await response.json();
+        
+        const container = document.getElementById('knowledge-gaps-container');
+        
+        if (gaps.length === 0) {
+            container.innerHTML = '<div class="empty-state"><p>🎉 Excellent! No significant knowledge gaps detected. You\'re doing great!</p></div>';
+            return;
+        }
+        
+        // Group by class
+        const gapsByClass = {};
+        gaps.forEach(gap => {
+            if (!gapsByClass[gap.class_name]) {
+                gapsByClass[gap.class_name] = [];
+            }
+            gapsByClass[gap.class_name].push(gap);
+        });
+        
+        container.innerHTML = Object.entries(gapsByClass).map(([className, classGaps]) => `
+            <div style="margin-bottom: 30px;">
+                <h3 style="color: var(--accent); margin-bottom: 15px;">${className}</h3>
+                <div class="cards-grid">
+                    ${classGaps.map(gap => {
+                        const masteryPct = (gap.mastery_level * 100).toFixed(1);
+                        const severity = masteryPct < 40 ? 'critical' : 'moderate';
+                        return `
+                            <div class="progress-card" style="border-left: 4px solid ${severity === 'critical' ? '#ef4444' : '#f59e0b'};">
+                                <h3>${gap.topic_name}</h3>
+                                <div style="margin: 15px 0;">
+                                    <div style="background: var(--surface-light); height: 24px; border-radius: 12px; overflow: hidden;">
+                                        <div style="background: ${severity === 'critical' ? '#ef4444' : '#f59e0b'}; height: 100%; width: ${masteryPct}%; transition: width 0.3s;"></div>
+                                    </div>
+                                    <p style="margin-top: 8px; text-align: center; color: var(--text-muted);">
+                                        Mastery: ${masteryPct}%
+                                    </p>
+                                </div>
+                                <div class="metric-grid">
+                                    <div class="metric">
+                                        <span class="metric-label">Questions Attempted</span>
+                                        <span class="metric-value">${gap.questions_attempted}</span>
+                                    </div>
+                                    <div class="metric">
+                                        <span class="metric-label">Correct</span>
+                                        <span class="metric-value ${severity === 'critical' ? 'low' : ''}">${gap.questions_correct}</span>
+                                    </div>
+                                </div>
+                                <div style="margin-top: 15px; padding: 12px; background: rgba(245, 158, 11, 0.1); border-radius: 8px;">
+                                    <strong style="color: var(--warning);">💡 Recommendation:</strong>
+                                    <p style="margin-top: 5px; font-size: 13px; color: var(--text-muted);">
+                                        ${severity === 'critical' ? 
+                                            'Review lecture materials and practice more quizzes on this topic.' :
+                                            'Take a few more practice quizzes to strengthen your understanding.'
+                                        }
+                                    </p>
+                                </div>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+            </div>
+        `).join('');
+    } catch (error) {
+        console.error('Error loading knowledge gaps:', error);
+        document.getElementById('knowledge-gaps-container').innerHTML = 
+            '<div class="empty-state"><p>Unable to load knowledge gaps. Please try again later.</p></div>';
+    }
+}
+
 function showSection(section) {
     document.querySelectorAll('.dashboard-section').forEach(s => s.classList.add('hidden'));
     document.querySelectorAll('.nav-menu li').forEach(li => li.classList.remove('active'));
     
-    if (section === 'my-classes') {
-        document.getElementById('my-classes-section').classList.remove('hidden');
-        document.querySelectorAll('.nav-menu li')[0].classList.add('active');
-        loadMyClasses();
-    } else if (section === 'available-classes') {
-        document.getElementById('available-classes-section').classList.remove('hidden');
-        document.querySelectorAll('.nav-menu li')[1].classList.add('active');
-        loadAvailableClasses();
-    } else if (section === 'progress') {
-        document.getElementById('progress-section').classList.remove('hidden');
-        document.querySelectorAll('.nav-menu li')[2].classList.add('active');
-        loadProgress();
+    const sections = {
+        'my-classes': { index: 0, element: 'my-classes-section', load: loadMyClasses },
+        'recommendations': { index: 1, element: 'recommendations-section', load: loadRecommendations },
+        'knowledge-gaps': { index: 2, element: 'knowledge-gaps-section', load: loadKnowledgeGaps },
+        'available-classes': { index: 3, element: 'available-classes-section', load: loadAvailableClasses },
+        'progress': { index: 4, element: 'progress-section', load: loadProgress }
+    };
+    
+    if (sections[section]) {
+        document.getElementById(sections[section].element).classList.remove('hidden');
+        document.querySelectorAll('.nav-menu li')[sections[section].index].classList.add('active');
+        sections[section].load();
     }
 }
 
