@@ -970,7 +970,13 @@ def send_password_reset_otp():
         logger.info(f"Password reset OTP sent to {email}")
         return jsonify({'message': 'OTP sent to your email'}), 200
     else:
-        return jsonify({'error': 'Failed to send email. Please check email configuration.'}), 500
+        # For demo purposes, return the OTP in the response
+        logger.warning(f"Email not configured, returning OTP in response for demo: {otp}")
+        return jsonify({
+            'message': f'Email not configured. For demo purposes, your OTP is: {otp}',
+            'otp': otp,
+            'demo_mode': True
+        }), 200
 
 @app.route('/api/forgot-password/verify-otp', methods=['POST'])
 def verify_and_reset_password():
