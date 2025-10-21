@@ -1,0 +1,244 @@
+{% extends "base.html" %}
+
+{% block title %}Student Dashboard - LearnVaultX{% endblock %}
+
+{% block content %}
+<!-- Sidebar Toggle Button -->
+<button class="sidebar-toggle" onclick="toggleSidebar()">☰</button>
+
+<!-- Feedback Button -->
+<button class="feedback-btn" onclick="openFeedbackModal()" title="Give Feedback">★</button>
+
+<!-- Feedback Modal -->
+<div id="feedback-modal" class="feedback-modal">
+    <div class="feedback-modal-content">
+        <div class="feedback-modal-header">
+            <h2>Send Us Feedback</h2>
+            <button class="close-feedback-btn" onclick="closeFeedbackModal()">×</button>
+        </div>
+        <form id="feedback-form">
+            <div class="star-rating">
+                <span class="star" onclick="selectRating(1)">★</span>
+                <span class="star" onclick="selectRating(2)">★</span>
+                <span class="star" onclick="selectRating(3)">★</span>
+                <span class="star" onclick="selectRating(4)">★</span>
+                <span class="star" onclick="selectRating(5)">★</span>
+            </div>
+            <textarea id="feedback-message" class="feedback-textarea" placeholder="Tell us what you think... (optional)"></textarea>
+            <button type="button" class="btn btn-primary btn-full" onclick="submitFeedback()">Submit Feedback</button>
+        </form>
+    </div>
+</div>
+
+<div class="dashboard">
+    <nav class="sidebar">
+        <div class="sidebar-header">
+            <h2>LearnVaultX</h2>
+            <p class="role-badge student">Student</p>
+        </div>
+        <ul class="nav-menu">
+            <li class="active"><a href="#" onclick="showSection('my-classes')">My Classes</a></li>
+            <li><a href="#" onclick="showSection('available-classes')">Join Classes</a></li>
+            <li><a href="#" onclick="showSection('progress')">My Progress</a></li>
+            <li><a href="/logout">Logout</a></li>
+        </ul>
+        <div class="user-info">
+            <p>{{ session.name }}</p>
+            <p class="text-muted">{{ session.email }}</p>
+        </div>
+    </nav>
+    
+    <main class="main-content">
+        <!-- My Classes Section -->
+        <section id="my-classes-section" class="dashboard-section">
+            <div class="section-header">
+                <h2>My Classes</h2>
+            </div>
+            
+            <div id="my-classes-grid" class="cards-grid">
+                <!-- Classes will be loaded here -->
+            </div>
+        </section>
+        
+        <!-- Available Classes Section -->
+        <section id="available-classes-section" class="dashboard-section hidden">
+            <div class="section-header">
+                <h2>Available Classes</h2>
+            </div>
+            
+            <div id="available-classes-grid" class="cards-grid">
+                <!-- Available classes will be loaded here -->
+            </div>
+        </section>
+        
+        <!-- Progress Section -->
+        <section id="progress-section" class="dashboard-section hidden">
+            <div class="section-header">
+                <h2>My Learning Progress</h2>
+            </div>
+            
+            <div id="progress-container">
+                <!-- Progress metrics will be loaded here -->
+            </div>
+        </section>
+    </main>
+</div>
+
+<script>
+async function loadMyClasses() {
+    try {
+        const response = await fetch('/api/student/classes');
+        const classes = await response.json();
+        
+        const grid = document.getElementById('my-classes-grid');
+        
+        if (classes.length === 0) {
+            grid.innerHTML = '<div class="empty-state"><p>You haven\'t joined any classes yet. Browse available classes to get started!</p></div>';
+            return;
+        }
+        
+        grid.innerHTML = classes.map(cls => `
+            <div class="class-card">
+                <h3>${cls.title}</h3>
+                <p>${cls.description || 'No description'}</p>
+                <p class="text-muted">Teacher: ${cls.teacher_name}</p>
+                <div class="card-actions">
+                    <a href="/class/${cls.id}" class="btn btn-primary btn-sm">Enter Class</a>
+                    <button onclick="joinLiveClass(${cls.id})" class="btn btn-live btn-sm">Join Live Class</button>
+                </div>
+            </div>
+        `).join('');
+        
+    } catch (error) {
+        console.error('Error loading classes:', error);
+    }
+}
+
+async function loadAvailableClasses() {
+    try {
+        const response = await fetch('/api/available_classes');
+        const classes = await response.json();
+        
+        const grid = document.getElementById('available-classes-grid');
+        
+        if (classes.length === 0) {
+            grid.innerHTML = '<div class="empty-state"><p>No new classes available at the moment.</p></div>';
+            return;
+        }
+        
+        grid.innerHTML = classes.map(cls => `
+            <div class="class-card">
+                <h3>${cls.title}</h3>
+                <p>${cls.description || 'No description'}</p>
+                <p class="text-muted">Teacher: ${cls.teacher_name}</p>
+                <div class="card-actions">
+                    <button class="btn btn-primary btn-sm" onclick="joinClass(${cls.id})">Join Class</button>
+                </div>
+            </div>
+        `).join('');
+        
+    } catch (error) {
+        console.error('Error loading available classes:', error);
+    }
+}
+
+async function joinClass(classId) {
+    try {
+        const response = await fetch('/api/join_class', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ class_id: classId })
+        });
+        
+        if (response.ok) {
+            alert('Successfully joined the class!');
+            loadAvailableClasses();
+            loadMyClasses();
+        } else {
+            const data = await response.json();
+            alert(data.error || 'Failed to join class');
+        }
+    } catch (error) {
+        console.error('Error joining class:', error);
+    }
+}
+
+async function loadProgress() {
+    try {
+        const response = await fetch('/api/analytics');
+        const metrics = await response.json();
+        
+        const container = document.getElementById('progress-container');
+        
+        if (metrics.length === 0) {
+            container.innerHTML = '<div class="empty-state"><p>No progress data yet. Take quizzes to see your progress!</p></div>';
+            return;
+        }
+        
+        container.innerHTML = `
+            <div class="progress-cards">
+                ${metrics.map(m => `
+                    <div class="progress-card">
+                        <h3>${m.class_name}</h3>
+                        <div class="metric-grid">
+                            <div class="metric">
+                                <span class="metric-label">Average Score</span>
+                                <span class="metric-value">${m.score_avg}%</span>
+                            </div>
+                            <div class="metric">
+                                <span class="metric-label">Avg Time</span>
+                                <span class="metric-value">${m.avg_time}s</span>
+                            </div>
+                            <div class="metric">
+                                <span class="metric-label">Learning Pace</span>
+                                <span class="metric-value ${m.pace_score < 4.5 ? 'low' : 'good'}">${m.pace_score}/10</span>
+                            </div>
+                            <div class="metric">
+                                <span class="metric-label">Overall Rating</span>
+                                <span class="metric-value rating">${m.rating}/10</span>
+                            </div>
+                        </div>
+                        ${m.pace_score < 4.5 ? `
+                            <div class="recommendation">
+                                <h4>Recommendations</h4>
+                                <ul>
+                                    <li>Review previous lectures</li>
+                                    <li>Practice more quizzes</li>
+                                    <li>Ask questions to the AI assistant</li>
+                                    <li>Engage more in class discussions</li>
+                                </ul>
+                            </div>
+                        ` : ''}
+                    </div>
+                `).join('')}
+            </div>
+        `;
+    } catch (error) {
+        console.error('Error loading progress:', error);
+    }
+}
+
+function showSection(section) {
+    document.querySelectorAll('.dashboard-section').forEach(s => s.classList.add('hidden'));
+    document.querySelectorAll('.nav-menu li').forEach(li => li.classList.remove('active'));
+    
+    if (section === 'my-classes') {
+        document.getElementById('my-classes-section').classList.remove('hidden');
+        document.querySelectorAll('.nav-menu li')[0].classList.add('active');
+        loadMyClasses();
+    } else if (section === 'available-classes') {
+        document.getElementById('available-classes-section').classList.remove('hidden');
+        document.querySelectorAll('.nav-menu li')[1].classList.add('active');
+        loadAvailableClasses();
+    } else if (section === 'progress') {
+        document.getElementById('progress-section').classList.remove('hidden');
+        document.querySelectorAll('.nav-menu li')[2].classList.add('active');
+        loadProgress();
+    }
+}
+
+// Load my classes on page load
+loadMyClasses();
+</script>
+{% endblock %}
+

@@ -1,0 +1,304 @@
+{% extends "base.html" %}
+
+{% block title %}Class - LearnVaultX{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+{% endblock %}
+
+{% block content %}
+<div class="class-view">
+    <header class="class-header">
+        <div class="header-left">
+            <a href="javascript:history.back()" class="back-btn">← Back</a>
+            <h1 id="class-title">Class</h1>
+        </div>
+        <div class="header-right">
+            <button class="btn btn-secondary btn-sm" onclick="showSection('lectures')">Lectures</button>
+            <button class="btn btn-secondary btn-sm" onclick="showSection('quizzes')">Quizzes</button>
+            <button class="btn btn-secondary btn-sm" onclick="showSection('chat')">Chat</button>
+        </div>
+    </header>
+    
+    <div class="class-content">
+        <!-- Lectures Section -->
+        <section id="lectures-section" class="content-section">
+            <h2>Lecture Materials</h2>
+            <div id="lectures-list" class="list-container">
+                <!-- Lectures will be loaded here -->
+            </div>
+        </section>
+        
+        <!-- Quizzes Section -->
+        <section id="quizzes-section" class="content-section hidden">
+            <h2>Quizzes</h2>
+            <div id="quizzes-list" class="list-container">
+                <!-- Quizzes will be loaded here -->
+            </div>
+        </section>
+        
+        <!-- Chat Section -->
+        <section id="chat-section" class="content-section hidden">
+            <h2>Class Discussion</h2>
+            <div class="chat-container">
+                <div class="chat-messages" id="chat-messages">
+                    <!-- Messages will appear here -->
+                </div>
+                <div class="chat-input-container">
+                    <input type="text" id="chat-input" placeholder="Type a message..." onkeypress="handleChatKeyPress(event)">
+                    <button class="btn btn-primary" onclick="sendMessage()">Send</button>
+                </div>
+            </div>
+        </section>
+        
+        <!-- Quiz Taking Section -->
+        <section id="quiz-taking-section" class="content-section hidden">
+            <div id="quiz-container">
+                <!-- Quiz will be loaded here -->
+            </div>
+        </section>
+    </div>
+</div>
+
+<script>
+const classId = {{ class_id }};
+let socket;
+let currentQuiz = null;
+let quizStartTime = null;
+
+// Initialize Socket.IO
+function initSocket() {
+    socket = io();
+    
+    socket.on('connect', () => {
+        socket.emit('join', { class_id: classId });
+    });
+    
+    socket.on('message', (data) => {
+        displayMessage(data);
+    });
+    
+    socket.on('status', (data) => {
+        displayStatus(data);
+    });
+}
+
+async function loadLectures() {
+    try {
+        const response = await fetch(`/api/class/${classId}/lectures`);
+        const lectures = await response.json();
+        
+        const container = document.getElementById('lectures-list');
+        
+        if (lectures.length === 0) {
+            container.innerHTML = '<div class="empty-state"><p>No lectures available yet.</p></div>';
+            return;
+        }
+        
+        container.innerHTML = lectures.map(lecture => `
+            <div class="lecture-item">
+                <div class="lecture-icon">📄</div>
+                <div class="lecture-info">
+                    <h4>${lecture.filename}</h4>
+                    <p class="text-muted">Uploaded: ${new Date(lecture.uploaded_at).toLocaleDateString()}</p>
+                </div>
+                <div class="lecture-actions">
+                    <a href="/${lecture.filepath}" class="btn btn-primary btn-sm" download>Download</a>
+                    <a href="/${lecture.filepath}" class="btn btn-secondary btn-sm" target="_blank">View</a>
+                </div>
+            </div>
+        `).join('');
+    } catch (error) {
+        console.error('Error loading lectures:', error);
+    }
+}
+
+async function loadQuizzes() {
+    try {
+        const response = await fetch(`/api/class/${classId}/quizzes`);
+        const quizzes = await response.json();
+        
+        const container = document.getElementById('quizzes-list');
+        
+        if (quizzes.length === 0) {
+            container.innerHTML = '<div class="empty-state"><p>No quizzes available yet.</p></div>';
+            return;
+        }
+        
+        container.innerHTML = quizzes.map(quiz => `
+            <div class="quiz-item">
+                <div class="quiz-icon">📝</div>
+                <div class="quiz-info">
+                    <h4>${quiz.title}</h4>
+                    <p class="text-muted">Created: ${new Date(quiz.created_at).toLocaleDateString()}</p>
+                </div>
+                <div class="quiz-actions">
+                    <button class="btn btn-primary btn-sm" onclick="startQuiz(${quiz.id})">Take Quiz</button>
+                </div>
+            </div>
+        `).join('');
+    } catch (error) {
+        console.error('Error loading quizzes:', error);
+    }
+}
+
+async function loadChatHistory() {
+    try {
+        const response = await fetch(`/api/class/${classId}/messages`);
+        const messages = await response.json();
+        
+        const container = document.getElementById('chat-messages');
+        container.innerHTML = messages.map(msg => `
+            <div class="chat-message">
+                <strong>${msg.user_name}:</strong>
+                <span>${msg.message}</span>
+                <span class="timestamp">${new Date(msg.timestamp).toLocaleTimeString()}</span>
+            </div>
+        `).join('');
+        
+        container.scrollTop = container.scrollHeight;
+    } catch (error) {
+        console.error('Error loading chat history:', error);
+    }
+}
+
+function displayMessage(data) {
+    const container = document.getElementById('chat-messages');
+    const msgDiv = document.createElement('div');
+    msgDiv.className = 'chat-message';
+    msgDiv.innerHTML = `
+        <strong>${data.user}:</strong>
+        <span>${data.message}</span>
+        <span class="timestamp">${data.timestamp}</span>
+    `;
+    container.appendChild(msgDiv);
+    container.scrollTop = container.scrollHeight;
+}
+
+function displayStatus(data) {
+    const container = document.getElementById('chat-messages');
+    const statusDiv = document.createElement('div');
+    statusDiv.className = 'chat-status';
+    statusDiv.textContent = data.msg;
+    container.appendChild(statusDiv);
+    container.scrollTop = container.scrollHeight;
+}
+
+function sendMessage() {
+    const input = document.getElementById('chat-input');
+    const message = input.value.trim();
+    
+    if (message) {
+        socket.emit('message', {
+            class_id: classId,
+            message: message
+        });
+        input.value = '';
+    }
+}
+
+function handleChatKeyPress(event) {
+    if (event.key === 'Enter') {
+        sendMessage();
+    }
+}
+
+async function startQuiz(quizId) {
+    try {
+        const response = await fetch(`/api/quiz/${quizId}`);
+        currentQuiz = await response.json();
+        quizStartTime = Date.now();
+        
+        showSection('quiz-taking');
+        
+        const container = document.getElementById('quiz-container');
+        container.innerHTML = `
+            <div class="quiz-header">
+                <h2>${currentQuiz.title}</h2>
+                <p>Total Questions: ${currentQuiz.questions.length}</p>
+            </div>
+            <form id="quiz-form" onsubmit="submitQuiz(event, ${quizId})">
+                ${currentQuiz.questions.map((q, idx) => `
+                    <div class="quiz-question">
+                        <h4>Question ${idx + 1}</h4>
+                        <p>${q.question_text}</p>
+                        <div class="quiz-options">
+                            ${q.options.map((opt, optIdx) => `
+                                <label class="quiz-option">
+                                    <input type="radio" name="q${q.id}" value="${optIdx}" required>
+                                    <span>${opt}</span>
+                                </label>
+                            `).join('')}
+                        </div>
+                    </div>
+                `).join('')}
+                <div class="quiz-actions">
+                    <button type="button" class="btn btn-secondary" onclick="showSection('quizzes')">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Submit Quiz</button>
+                </div>
+            </form>
+        `;
+    } catch (error) {
+        console.error('Error starting quiz:', error);
+    }
+}
+
+async function submitQuiz(event, quizId) {
+    event.preventDefault();
+    
+    const formData = new FormData(event.target);
+    const answers = {};
+    
+    currentQuiz.questions.forEach(q => {
+        const answer = formData.get(`q${q.id}`);
+        if (answer !== null) {
+            answers[q.id] = parseInt(answer);
+        }
+    });
+    
+    const duration = Math.floor((Date.now() - quizStartTime) / 1000);
+    
+    try {
+        const response = await fetch('/api/submit_quiz', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                quiz_id: quizId,
+                answers: answers,
+                duration: duration
+            })
+        });
+        
+        const result = await response.json();
+        
+        alert(`Quiz submitted!\nScore: ${result.score}/${result.total} (${result.percentage}%)`);
+        showSection('quizzes');
+        
+    } catch (error) {
+        console.error('Error submitting quiz:', error);
+    }
+}
+
+function showSection(section) {
+    document.querySelectorAll('.content-section').forEach(s => s.classList.add('hidden'));
+    
+    if (section === 'lectures') {
+        document.getElementById('lectures-section').classList.remove('hidden');
+        loadLectures();
+    } else if (section === 'quizzes') {
+        document.getElementById('quizzes-section').classList.remove('hidden');
+        loadQuizzes();
+    } else if (section === 'chat') {
+        document.getElementById('chat-section').classList.remove('hidden');
+        loadChatHistory();
+    } else if (section === 'quiz-taking') {
+        document.getElementById('quiz-taking-section').classList.remove('hidden');
+    }
+}
+
+// Initialize
+initSocket();
+loadLectures();
+</script>
+{% endblock %}
+

@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}LearnVaultX - Adaptive Learning Platform{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    
+    <!-- MathJax for rendering math equations -->
+    <script>
+    MathJax = {
+        tex: {
+            inlineMath: [['$', '$'], ['\\(', '\\)']],
+            displayMath: [['$$', '$$'], ['\\[', '\\]']],
+            processEscapes: true,
+            processEnvironments: true
+        },
+        options: {
+            skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre']
+        }
+    };
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" async></script>
+    
+    {% block extra_css %}{% endblock %}
+</head>
+<body>
+    <div class="container">
+        {% block content %}{% endblock %}
+    </div>
+    
+    <!-- AI Chatbot Panel -->
+    <div id="ai-chatbot" class="ai-panel hidden">
+        <div class="ai-header">
+            <h3>AI Assistant</h3>
+            <button class="close-btn" onclick="toggleAIPanel()">×</button>
+        </div>
+        <div class="ai-messages" id="ai-messages">
+            <div class="ai-message bot">
+                <p>Hello! I'm your AI learning assistant. Ask me anything!</p>
+            </div>
+        </div>
+        <div class="ai-input-container">
+            <textarea id="ai-input" placeholder="Ask a question..." rows="2"></textarea>
+            <button id="ai-send-btn" onclick="sendAIMessage()">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="22" y1="2" x2="11" y2="13"></line>
+                    <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                </svg>
+            </button>
+        </div>
+    </div>
+    
+    <!-- AI Toggle Button -->
+    {% if session.user_id %}
+    <button class="ai-toggle-btn" onclick="toggleAIPanel()">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
+            <path d="M2 17l10 5 10-5M2 12l10 5 10-5"></path>
+        </svg>
+        AI
+    </button>
+    
+    <!-- Network Speed Indicator -->
+    <div id="network-speed-indicator" class="network-speed-indicator">
+        <div class="speed-icon">📡</div>
+        <div class="speed-info">
+            <div class="speed-label">Network</div>
+            <div id="speed-value" class="speed-value">Testing...</div>
+        </div>
+        <div id="speed-status" class="speed-status">
+            <span class="speed-dot"></span>
+        </div>
+    </div>
+    {% endif %}
+    
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+    {% block extra_js %}{% endblock %}
+</body>
+</html>
+
